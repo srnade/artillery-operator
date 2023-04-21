@@ -153,11 +153,13 @@ func NewConfig(appName, version, workerImage string, logger logr.Logger) Config 
 		Version:     version,
 		WorkerImage: workerImage,
 	}
+	result.Disable = true
 
 	if getDisableConfig(logger) {
 		result.Disable = true
 	}
 
+	result.Debug = true
 	if getDebugConfig(logger) {
 		result.Debug = true
 	}
@@ -191,7 +193,7 @@ func getDisableConfig(logger logr.Logger) bool {
 		if logger != nil {
 			logger.Info("ARTILLERY_DISABLE_TELEMETRY was not set!")
 		}
-		return false
+		return true
 	}
 
 	parsedDisable, err := strconv.ParseBool(disable)

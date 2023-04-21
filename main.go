@@ -14,11 +14,8 @@ package main
 
 import (
 	"flag"
-	"io"
 	"os"
 
-	"github.com/artilleryio/artillery-operator/internal/telemetry"
-	"github.com/go-logr/logr"
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
@@ -32,6 +29,7 @@ import (
 
 	loadtestv1alpha1 "github.com/artilleryio/artillery-operator/api/v1alpha1"
 	"github.com/artilleryio/artillery-operator/controllers"
+	"github.com/artilleryio/artillery-operator/internal/telemetry"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -47,11 +45,11 @@ func init() {
 	// +kubebuilder:scaffold:scheme
 }
 
-func doClose(closer io.Closer, msg string, logger logr.Logger) {
-	if err := closer.Close(); err != nil {
-		logger.Error(err, msg)
-	}
-}
+// func doClose(closer io.Closer, msg string, logger logr.Logger) {
+// 	if err := closer.Close(); err != nil {
+// 		logger.Error(err, msg)
+// 	}
+// }
 
 func main() {
 	var metricsAddr string
@@ -90,15 +88,15 @@ func main() {
 	}
 
 	telemetryConfig := telemetry.NewConfig(controllers.AppName, controllers.Version, controllers.WorkerImage, setupLog)
-	telemetryClient, err := telemetry.NewClient(telemetryConfig)
-	if err != nil {
-		setupLog.Error(err, "unable to create telemetry client")
-		os.Exit(1)
-	}
-	defer doClose(telemetryClient, "could not close Posthog telemetry client", setupLog)
+	// telemetryClient, err := telemetry.NewClient(telemetryConfig)
+	// if err != nil {
+	// 	setupLog.Error(err, "unable to create telemetry client")
+	// 	os.Exit(1)
+	// }
+	// defer doClose(telemetryClient, "could not close Posthog telemetry client", setupLog)
 
 	reconciler.TelemetryConfig = telemetryConfig
-	reconciler.TelemetryClient = telemetryClient
+	// reconciler.TelemetryClient = telemetryClient
 
 	setupLog.Info("Telemetry config", "disable", telemetryConfig.Disable, "debug", telemetryConfig.Debug)
 

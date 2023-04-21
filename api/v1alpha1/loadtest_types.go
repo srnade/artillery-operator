@@ -55,8 +55,10 @@ type LoadTestSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
-	Count       int    `json:"count,omitempty"`
-	Environment string `json:"environment,omitempty"`
+	Count       int      `json:"count,omitempty"`
+	Environment string   `json:"environment,omitempty"`
+	Image       string   `json:"image,omitempty"`
+	Args        []string `json:"args,omitempty"`
 
 	// +kubebuilder:validation:Required
 	TestScript TestScript `json:"testScript"`

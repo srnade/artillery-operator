@@ -20,6 +20,8 @@ import (
 	"github.com/go-logr/logr"
 	v1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
+
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -78,6 +80,28 @@ func (r *LoadTestReconciler) job(v *lt.LoadTest) *v1.Job {
 		parallelism = int32(v.Spec.Count)
 		completions = int32(v.Spec.Count)
 	}
+	img := WorkerImage
+	resources := corev1.ResourceRequirements{
+		Limits: corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("2"),
+			corev1.ResourceMemory: resource.MustParse("4Gi"),
+		},
+		Requests: corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("1"),
+			corev1.ResourceMemory: resource.MustParse("2Gi"),
+		},
+	}
+	if v.Spec.Image != "" {
+		img = v.Spec.Image
+	}
+
+	args := []string{
+		"help",
+	}
+
+	if v.Spec.Args != nil {
+		args = v.Spec.Args
+	}
 
 	job := &v1.Job{
 		ObjectMeta: metav1.ObjectMeta{
@@ -98,18 +122,16 @@ func (r *LoadTestReconciler) job(v *lt.LoadTest) *v1.Job {
 					Containers: []corev1.Container{
 						{
 							Name:            v.Name,
-							Image:           WorkerImage,
-							ImagePullPolicy: corev1.PullAlways,
+							Image:           img,
+							ImagePullPolicy: corev1.PullIfNotPresent,
 							VolumeMounts: []corev1.VolumeMount{
 								{
 									Name:      TestScriptVol,
 									MountPath: "/data",
 								},
 							},
-							Args: []string{
-								"run",
-								"/data/" + TestScriptFilename,
-							},
+							Resources: resources,
+							Args:      args,
 							Env: append(
 								[]corev1.EnvVar{
 									// published metrics use WORKER_ID to connect the pod (worker) to a Pushgateway JobID
