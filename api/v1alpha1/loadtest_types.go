@@ -44,10 +44,12 @@ type Config struct {
 	ConfigMap string `json:"configMap"`
 }
 
-type TestScript struct {
-	// +kubebuilder:validation:Required
-	Config   Config    `json:"config"`
-	External *External `json:"external,omitempty"`
+type SecretMountSource struct {
+	// Name of the secret to mount
+	Name string `json:"name,omitempty"`
+
+	// Location you wish to mount the secret
+	MountPoint string `json:"mountPoint,omitempty"`
 }
 
 // LoadTestSpec defines the desired state of LoadTest
@@ -59,9 +61,22 @@ type LoadTestSpec struct {
 	Environment string   `json:"environment,omitempty"`
 	Image       string   `json:"image,omitempty"`
 	Args        []string `json:"args,omitempty"`
+	// +optional
+	Resources *core.ResourceRequirements `json:"resources,omitempty"`
 
-	// +kubebuilder:validation:Required
-	TestScript TestScript `json:"testScript"`
+	// +optional
+	// Used when you've created a secrent from .env. files and you want to have those as ENVVARs inside the pod
+	SecretEnvSource string `json:"secretEnvSource,omitempty"`
+
+	// +optional
+	// Used when you have created a secret containing many files you wish to mount
+	SecretMount *SecretMountSource `json:"secretMount,omitempty"`
+
+	// +optional
+	// Name of the users file you wish to use.
+	// If mounting multiple files via the SecretMount pick which one to use
+	// You must use this with SecretMount to mount the file
+	UsersFile string `json:"usersFile,omitempty"`
 }
 
 // LoadTestConditionType creates types for K8s Conditions created by the operator

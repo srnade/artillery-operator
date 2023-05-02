@@ -15,6 +15,8 @@ package controllers
 //goland:noinspection SpellCheckingInspection
 import (
 	"context"
+	"errors"
+	"fmt"
 
 	lt "github.com/artilleryio/artillery-operator/api/v1alpha1"
 	"github.com/go-logr/logr"
@@ -22,12 +24,29 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 
-	"k8s.io/apimachinery/pkg/api/errors"
+	k8error "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
+
+func MergePreservingExistingKeys(dest, src map[corev1.ResourceName]resource.Quantity) map[corev1.ResourceName]resource.Quantity {
+	if dest == nil {
+		if src == nil {
+			return nil
+		}
+		dest = make(map[corev1.ResourceName]resource.Quantity, len(src))
+	}
+
+	for k, v := range src {
+		if _, exists := dest[k]; !exists {
+			dest[k] = v
+		}
+	}
+
+	return dest
+}
 
 // ensureJob creates a Job that in turn creates the required worker Pods
 // to run load tests using an Artillery image.
@@ -44,7 +63,7 @@ func (r *LoadTestReconciler) ensureJob(
 		Namespace: instance.Namespace,
 	}, found)
 
-	if err != nil && errors.IsNotFound(err) {
+	if err != nil && k8error.IsNotFound(err) {
 		// Create a new job
 		logger.Info("Creating a new Job", "Job.Namespace", job.Namespace, "Job.Name", job.Name)
 
@@ -69,7 +88,8 @@ func (r *LoadTestReconciler) ensureJob(
 }
 
 // job creates a Job spec based on the LoadTest Custom Resource.
-func (r *LoadTestReconciler) job(v *lt.LoadTest) *v1.Job {
+func (r *LoadTestReconciler) job(v *lt.LoadTest, logger logr.Logger) *v1.Job {
+
 	var (
 		parallelism  int32 = 1
 		completions  int32 = 1
@@ -81,16 +101,24 @@ func (r *LoadTestReconciler) job(v *lt.LoadTest) *v1.Job {
 		completions = int32(v.Spec.Count)
 	}
 	img := WorkerImage
+
 	resources := corev1.ResourceRequirements{
 		Limits: corev1.ResourceList{
 			corev1.ResourceCPU:    resource.MustParse("2"),
 			corev1.ResourceMemory: resource.MustParse("4Gi"),
 		},
 		Requests: corev1.ResourceList{
-			corev1.ResourceCPU:    resource.MustParse("1"),
+			corev1.ResourceCPU:    resource.MustParse("2"),
 			corev1.ResourceMemory: resource.MustParse("2Gi"),
 		},
 	}
+	if v.Spec.Resources != nil && v.Spec.Resources.Limits != nil {
+		resources.Limits = MergePreservingExistingKeys(v.Spec.Resources.Limits, resources.Limits)
+	}
+	if v.Spec.Resources != nil && v.Spec.Resources.Requests != nil {
+		resources.Requests = MergePreservingExistingKeys(v.Spec.Resources.Requests, resources.Requests)
+	}
+
 	if v.Spec.Image != "" {
 		img = v.Spec.Image
 	}
@@ -102,6 +130,58 @@ func (r *LoadTestReconciler) job(v *lt.LoadTest) *v1.Job {
 	if v.Spec.Args != nil {
 		args = v.Spec.Args
 	}
+	var completion v1.CompletionMode = v1.IndexedCompletion
+	secrets := []corev1.EnvFromSource{}
+
+	if v.Spec.SecretEnvSource != "" {
+		secrets = append(secrets, corev1.EnvFromSource{
+			SecretRef: &corev1.SecretEnvSource{
+				LocalObjectReference: corev1.LocalObjectReference{
+					Name: v.Spec.SecretEnvSource,
+				},
+			},
+		})
+	}
+
+	volumes := []corev1.Volume{}
+	volumeMounts := []corev1.VolumeMount{}
+
+	envVars := []corev1.EnvVar{
+		// published metrics use WORKER_ID to connect the pod (worker) to a Pushgateway JobID
+		// Uses the downward API:
+		// https://kubernetes.io/docs/tasks/inject-data-application/downward-api-volume-expose-pod-information/#the-downward-api
+		{
+			Name: "WORKER_ID",
+			ValueFrom: &corev1.EnvVarSource{
+				FieldRef: &corev1.ObjectFieldSelector{
+					FieldPath: "metadata.name",
+				},
+			},
+		}}
+
+	if v.Spec.SecretMount != nil {
+		sm := *v.Spec.SecretMount
+		volumes = append(volumes, corev1.Volume{
+			Name: sm.Name,
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{
+					SecretName: sm.Name,
+				},
+			},
+		})
+		if v.Spec.UsersFile == "" {
+			logger.Error(errors.New("You need to specify the UsersFile when mounting a SecretsMount"), "")
+		}
+		volumeMounts = append(volumeMounts, corev1.VolumeMount{
+			Name:      sm.Name,
+			MountPath: sm.MountPoint,
+		})
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  "USERS_PAYLOAD_PATH",
+			Value: fmt.Sprintf("%s/%s", sm.MountPoint, v.Spec.UsersFile),
+		})
+
+	}
 
 	job := &v1.Job{
 		ObjectMeta: metav1.ObjectMeta{
@@ -110,9 +190,10 @@ func (r *LoadTestReconciler) job(v *lt.LoadTest) *v1.Job {
 			Labels:    labels(v, "loadtest-worker-master"),
 		},
 		Spec: v1.JobSpec{
-			Parallelism:  &parallelism,
-			Completions:  &completions,
-			BackoffLimit: &backoffLimit,
+			Parallelism:    &parallelism,
+			Completions:    &completions,
+			CompletionMode: &completion,
+			BackoffLimit:   &backoffLimit,
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: labels(v, "loadtest-worker"),
@@ -124,46 +205,18 @@ func (r *LoadTestReconciler) job(v *lt.LoadTest) *v1.Job {
 							Name:            v.Name,
 							Image:           img,
 							ImagePullPolicy: corev1.PullIfNotPresent,
-							VolumeMounts: []corev1.VolumeMount{
-								{
-									Name:      TestScriptVol,
-									MountPath: "/data",
-								},
-							},
-							Resources: resources,
-							Args:      args,
-							Env: append(
-								[]corev1.EnvVar{
-									// published metrics use WORKER_ID to connect the pod (worker) to a Pushgateway JobID
-									// Uses the downward API:
-									// https://kubernetes.io/docs/tasks/inject-data-application/downward-api-volume-expose-pod-information/#the-downward-api
-									{
-										Name: "WORKER_ID",
-										ValueFrom: &corev1.EnvVarSource{
-											FieldRef: &corev1.ObjectFieldSelector{
-												FieldPath: "metadata.name",
-											},
-										},
-									},
-								},
+							Resources:       resources,
+							Args:            args,
+							EnvFrom:         secrets,
+							Env: append(envVars,
 								r.TelemetryConfig.ToK8sEnvVar()...,
 							),
+							VolumeMounts: volumeMounts,
 						},
 					},
 					// Provides access to the ConfigMap holding the test script config
-					Volumes: []corev1.Volume{
-						{
-							Name: TestScriptVol,
-							VolumeSource: corev1.VolumeSource{
-								ConfigMap: &corev1.ConfigMapVolumeSource{
-									LocalObjectReference: corev1.LocalObjectReference{
-										Name: v.Spec.TestScript.Config.ConfigMap,
-									},
-								},
-							},
-						},
-					},
 					RestartPolicy: "Never",
+					Volumes:       volumes,
 				},
 			},
 		},

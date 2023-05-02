@@ -62,46 +62,52 @@ spec:
                 type: string
               image:
                 type: string
-              testScript:
+              resources:
+                description: ResourceRequirements describes the compute resource requirements.
                 properties:
-                  config:
-                    properties:
-                      configMap:
-                        minLength: 1
-                        type: string
-                    required:
-                    - configMap
+                  limits:
+                    additionalProperties:
+                      anyOf:
+                      - type: integer
+                      - type: string
+                      pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                      x-kubernetes-int-or-string: true
+                    description: 'Limits describes the maximum amount of compute resources
+                      allowed. More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/'
                     type: object
-                  external:
-                    properties:
-                      payload:
-                        properties:
-                          configMaps:
-                            items:
-                              type: string
-                            type: array
-                        type: object
-                      processor:
-                        properties:
-                          main:
-                            properties:
-                              configMap:
-                                type: string
-                            type: object
-                          related:
-                            properties:
-                              configMaps:
-                                items:
-                                  type: string
-                                type: array
-                            type: object
-                        type: object
+                  requests:
+                    additionalProperties:
+                      anyOf:
+                      - type: integer
+                      - type: string
+                      pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                      x-kubernetes-int-or-string: true
+                    description: 'Requests describes the minimum amount of compute
+                      resources required. If Requests is omitted for a container,
+                      it defaults to Limits if that is explicitly specified, otherwise
+                      to an implementation-defined value. More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/'
                     type: object
-                required:
-                - config
                 type: object
-            required:
-            - testScript
+              secretEnvSource:
+                description: Used when you've created a secrent from .env. files and
+                  you want to have those as ENVVARs inside the pod
+                type: string
+              secretMount:
+                description: Used when you have created a secret containing many files
+                  you wish to mount
+                properties:
+                  mountPoint:
+                    description: Location you wish to mount the secret
+                    type: string
+                  name:
+                    description: Name of the secret to mount
+                    type: string
+                type: object
+              usersFile:
+                description: Name of the users file you wish to use. If mounting multiple
+                  files via the SecretMount pick which one to use You must use this
+                  with SecretMount to mount the file
+                type: string
             type: object
           status:
             description: LoadTestStatus defines the observed state of LoadTest.
